@@ -1,0 +1,363 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==================================================================
+// TENANCY (platform -> businesses -> scoped data)           (§16, §22)
+// ==================================================================
+model Tenant {
+  id                String   @id @default(uuid())
+  name              String
+  slug              String   @unique
+  businessType      String?
+  whatsappPhone     String?
+  whatsappAccountId String?
+  status            String   @default("ACTIVE")
+  settings          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  users           User[]
+  customers       Customer[]
+  conversations   Conversation[]
+  messages        Message[]
+  menus           Menu[]
+  workflows       Workflow[]
+  templates       Template[]
+  entities        Entity[]
+  records         Record[]
+  campaigns       Campaign[]
+  auditLogs       AuditLog[]
+  assignmentLogs  AgentAssignment[]
+}
+
+model User {
+  id            String   @id @default(uuid())
+  tenantId      String?
+  email         String   @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  role          String   @default("AGENT")
+  agentStatus   String?  @default("OFFLINE")
+  isActive      Boolean  @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant            Tenant?            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  refreshTokens     RefreshToken[]
+  conversations     Conversation[]     @relation("AgentConversations")
+  auditLogs         AuditLog[]
+  assignments       AgentAssignment[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  familyId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ==================================================================
+// CRM + CONVERSATION ENGINE                                   (§3, §10)
+// ==================================================================
+model Customer {
+  id             String   @id @default(uuid())
+  tenantId       String
+  name           String?
+  phone          String?
+  email          String?
+  tags           Json?    @default("[]")
+  metadata       Json?
+  lastActivityAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant        Tenant?        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId])
+}
+
+model Conversation {
+  id                String    @id @default(uuid())
+  tenantId          String
+  customerId        String
+  channel           String    @default("WHATSAPP")
+  status            String    @default("OPEN")
+  mode              String    @default("AUTOMATED")
+  currentWorkflowId String?
+  currentNodeId     String?
+  assignedAgentId   String?
+  variables         Json?     @default("{}")
+  startedAt         DateTime  @default(now())
+  lastMessageAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant      Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  agent       User?         @relation("AgentConversations", fields: [assignedAgentId], references: [id])
+  messages    Message[]
+  assignments AgentAssignment[]
+
+  @@index([tenantId, status])
+  @@index([customerId])
+}
+
+model Message {
+  id                String    @id @default(uuid())
+  tenantId          String
+  conversationId    String
+  direction         String    @default("INBOUND")
+  senderType        String    @default("CUSTOMER")
+  senderId          String?
+  messageType       String    @default("TEXT")
+  content           String?
+  media             Json?
+  providerMessageId String?
+  status            String    @default("QUEUED")
+  metadata          Json?
+  timestamp         DateTime  @default(now())
+
+  tenant       Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([tenantId, timestamp])
+}
+
+model AgentAssignment {
+  id             String   @id @default(uuid())
+  tenantId       String
+  conversationId String
+  agentId        String
+  assignedAt     DateTime @default(now())
+  unassignedAt   DateTime?
+  reason         String?
+
+  tenant       Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agent        User          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+// ==================================================================
+// MENU ENGINE (data-driven, not hardcoded)                     (§4, §5)
+// ==================================================================
+model Menu {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  trigger     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items  MenuItem[]
+  linkedFrom MenuItem[] @relation("MenuItemLink")
+
+  @@index([tenantId])
+}
+
+model MenuItem {
+  id             String   @id @default(uuid())
+  menuId         String
+  label          String
+  action         String   @default("SHOW_MENU")
+  actionConfig   Json?
+  nextMenuId     String?
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  menu        Menu?  @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  nextMenu    Menu?  @relation("MenuItemLink", fields: [nextMenuId], references: [id])
+
+  @@index([menuId])
+}
+
+// ==================================================================
+// WORKFLOW ENGINE (generic nodes, §6/§7)                    (§6, §21-P5)
+// ==================================================================
+model Workflow {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  triggerType String   @default("MESSAGE_RECEIVED")
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  nodes  WorkflowNode[]
+
+  @@index([tenantId])
+}
+
+model WorkflowNode {
+  id         String   @id @default(uuid())
+  workflowId String
+  name       String
+  nodeType   String   @default("MESSAGE")
+  config     Json?
+  position   Json?    @default("{}")
+  nextNodeId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  workflow Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  nextNode WorkflowNode?  @relation("NextNodeLink", fields: [nextNodeId], references: [id])
+  previousNodes WorkflowNode[] @relation("NextNodeLink")
+
+  @@index([workflowId])
+}
+
+// ==================================================================
+// TEMPLATES                                                     (§21-P4)
+// ==================================================================
+model Template {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  body       String
+  language   String   @default("en")
+  category   String?
+  status     String   @default("DRAFT")
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaigns Campaign[]
+
+  @@index([tenantId])
+}
+
+// ==================================================================
+// GENERIC BUSINESS DATA / ENTITY ENGINE                        (§8, §9)
+// ==================================================================
+model Entity {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  slug        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fields EntityField[]
+  records Record[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+}
+
+model EntityField {
+  id         String   @id @default(uuid())
+  entityId   String
+  key        String
+  label      String
+  fieldType  String   @default("TEXT")
+  required   Boolean  @default(false)
+  options    Json?
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId])
+}
+
+model Record {
+  id         String   @id @default(uuid())
+  tenantId   String
+  entityId   String
+  data       Json
+  status     String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entity Entity  @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([entityId])
+  @@index([tenantId])
+}
+
+// ==================================================================
+// CAMPAIGNS (stub for later, §12)                              (§21-P12)
+// ==================================================================
+model Campaign {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  audience    Json?
+  templateId  String?
+  status      String    @default("DRAFT")
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  stats       Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template Template? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+}
+
+// ==================================================================
+// AUDIT + WHATSAPP INGEST                                       (§17)
+// ==================================================================
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String?
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  diff       Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+}
+
+// Idempotency record for inbound provider webhooks (WhatsApp Cloud API)
+model WhatsAppWebhookEvent {
+  id              String   @id @default(uuid())
+  idempotencyKey  String   @unique
+  provider        String   @default("WHATSAPP")
+  payload         Json
+  status          String   @default("RECEIVED")
+  createdAt       DateTime @default(now())
+  processedAt     DateTime?
+}

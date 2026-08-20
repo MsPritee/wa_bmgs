@@ -1,0 +1,29 @@
+{
+  "name": "whatsapp-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Generic WhatsApp Business Automation & Management Platform",
+  "workspaces": [
+    "apps/api",
+    "apps/web",
+    "packages/shared"
+  ],
+  "scripts": {
+    "predev": "npm run build -w @wa/shared",
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev -w @wa/api",
+    "dev:web": "npm run dev -w @wa/web",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test -w @wa/api",
+    "db:push": "npm run db:push -w @wa/api",
+    "db:seed": "npm run db:seed -w @wa/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
