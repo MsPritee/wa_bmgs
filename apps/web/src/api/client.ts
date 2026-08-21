@@ -1,6 +1,6 @@
 import { useAuthStore } from '../stores/auth';
 import type { SessionUser } from '../stores/auth';
-import type { ConversationDetail, ConversationItem, Customer, Overview, TrendPoint } from '../types';
+import type { Business, ConversationDetail, ConversationItem, Customer, Overview, TrendPoint } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '/api/v1';
 
@@ -65,7 +65,8 @@ export const endpoints = {
   entities: () => api<{ id: string; name: string; slug: string; fields: { id: string; key: string; label: string; fieldType: string; required: boolean }[]; _count?: { records: number } }[]>('/entities'),
   templates: () => api<{ id: string; name: string; body: string; language: string; status: string }[]>('/templates'),
   agents: () => api<{ id: string; name: string; email: string; agentStatus: string | null; isActive: boolean; _count: { conversations: number } }[]>('/agents'),
-  business: () => api<{ id: string; name: string; slug: string; businessType?: string | null; whatsappPhone?: string | null; whatsappAccountId?: string | null; settings?: Record<string, unknown> | null }>('/businesses/me'),
+  business: () => api<Business>('/businesses/me'),
+  updateBusiness: (payload: { name?: string; businessType?: string; whatsappPhone?: string; whatsappAccountId?: string }) => api<Business>('/businesses/me', { method: 'PUT', body: payload }),
   messages: (conversationId: string) => api<import('../types').Message[]>(`/messages?conversationId=${conversationId}`),
   sendMessage: (payload: { conversationId: string; content: string; messageType?: string }) => api('/messages/send', { method: 'POST', body: payload }),
   takeover: (id: string) => api(`/conversations/${id}/takeover`, { method: 'POST' }),

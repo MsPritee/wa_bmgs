@@ -52,3 +52,13 @@ export type Overview = {
 };
 
 export type TrendPoint = { date: string; count: number };
+
+export type Business = {
+  id: string;
+  name: string;
+  slug: string;
+  businessType?: string | null;
+  whatsappPhone?: string | null;
+  whatsappAccountId?: string | null;
+  settings?: Record<string, unknown> | null;
+};
