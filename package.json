@@ -9,6 +9,7 @@
     "packages/shared"
   ],
   "scripts": {
+    "postinstall": "node -e \"const{execSync}=require('child_process');try{execSync('npx --no-install prisma generate --schema=apps/api/prisma/schema.prisma',{stdio:'inherit'})}catch{console.log('[postinstall] prisma CLI unavailable - skipping generate')}\"",
     "predev": "npm run build -w @wa/shared && npx prisma generate --schema=apps/api/prisma/schema.prisma",
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev -w @wa/api",
