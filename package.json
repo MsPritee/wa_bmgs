@@ -9,8 +9,7 @@
     "packages/shared"
   ],
   "scripts": {
-    "postinstall": "prisma generate --schema=apps/api/prisma/schema.prisma",
-    "predev": "npm run build -w @wa/shared",
+    "predev": "npm run build -w @wa/shared && npx prisma generate --schema=apps/api/prisma/schema.prisma",
     "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev -w @wa/api",
     "dev:web": "npm run dev -w @wa/web",
