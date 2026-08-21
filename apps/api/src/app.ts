@@ -4,7 +4,7 @@ import cors from 'cors';
 import apiRoutes from './routes/index.js';
 import whatsappRoutes from './modules/whatsapp/index.js';
 import { notFoundHandler, errorHandler } from './middleware/error.js';
-import { isProd } from './config/env.js';
+import { isProd, env } from './config/env.js';
 
 export const app = express();
 
@@ -14,7 +14,8 @@ app.use(
     crossOriginResourcePolicy: isProd ? { policy: 'same-origin' } : false,
   }),
 );
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = (env.WEB_ORIGIN ?? 'http://localhost:5173').split(',').map(s => s.trim());
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(
   express.json({
     limit: '2mb',

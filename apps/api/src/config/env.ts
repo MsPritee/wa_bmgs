@@ -14,6 +14,7 @@ const envSchema = z.object({
   WHATSAPP_API_VERSION: z.string().default('v22.0'),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default(''),
   WHATSAPP_API_TOKEN: z.string().default(''),
+  WEB_ORIGIN: z.string().default('http://localhost:5173'),
   VITE_API_URL: z.string().default('http://localhost:4000/api/v1'),
 });
 

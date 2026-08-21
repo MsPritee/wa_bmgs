@@ -74,6 +74,9 @@ async function ingest(payload: WhatsAppWebhookPayload) {
   if (!value || !value.messages?.length) return;
 
   const incoming = value.messages[0];
+  const metaMsgId = incoming.id;
+  if (!metaMsgId) return;
+
   const businessPhone = value.metadata?.display_phone_number;
   const customerPhone = incoming.from;
   const messageBody = incoming.text?.body ?? '';
@@ -81,6 +84,12 @@ async function ingest(payload: WhatsAppWebhookPayload) {
 
   const tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: businessPhone, status: 'ACTIVE' } });
   if (!tenant) return;
+
+  // Deduplicate by Meta message ID
+  const existing = await prisma.message.findFirst({
+    where: { tenantId: tenant.id, providerMessageId: metaMsgId }
+  });
+  if (existing) return;
 
   const normalized = normalizePhone(customerPhone);
   let customer = await prisma.customer.findFirst({ where: { tenantId: tenant.id, phone: normalized } });

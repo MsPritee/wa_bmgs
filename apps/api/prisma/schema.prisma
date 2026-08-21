@@ -140,6 +140,7 @@ model Message {
 
   @@index([conversationId])
   @@index([tenantId, timestamp])
+  @@unique([providerMessageId, tenantId])
 }
 
 model AgentAssignment {
