@@ -123,19 +123,24 @@ async function ingest(payload: WhatsAppWebhookPayload) {
     });
   }
 
-  await prisma.message.create({
-    data: {
-      tenantId: tenant.id,
-      conversationId: conversation.id,
-      direction: 'INBOUND',
-      senderType: 'CUSTOMER',
-      senderId: customer.id,
-      messageType: 'TEXT',
-      content: messageBody,
-      providerMessageId: incoming.id,
-      status: 'DELIVERED',
-    },
-  });
+  try {
+    await prisma.message.create({
+      data: {
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        direction: 'INBOUND',
+        senderType: 'CUSTOMER',
+        senderId: customer.id,
+        messageType: 'TEXT',
+        content: messageBody,
+        providerMessageId: incoming.id,
+        status: 'DELIVERED',
+      },
+    });
+  } catch (err) {
+    if ((err as { code?: string }).code === 'P2002') return;
+    throw err;
+  }
   await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 
   if (incoming.id) {
