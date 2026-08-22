@@ -1,7 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 import { ApiError } from '../lib/http.js';
-import { isProd } from '../config/env.js';
 
 export function notFoundHandler(_req: Request, res: Response) {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
@@ -34,7 +33,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Record not found' } });
     return;
   }
-   
-  if (!isProd) console.error(err);
+  console.error('[api] unhandled error:', err);
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
 }
