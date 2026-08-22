@@ -215,8 +215,12 @@ class MockProvider implements WhatsAppProvider {
   }
 }
 
+export function describeProvider(): 'meta' | 'mock' {
+  return env.WHATSAPP_API_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID ? 'meta' : 'mock';
+}
+
 export function getProvider(): WhatsAppProvider {
-  return env.WHATSAPP_API_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID ? new MetaProvider() : new MockProvider();
+  return describeProvider() === 'meta' ? new MetaProvider() : new MockProvider();
 }
 
 export const provider: WhatsAppProvider = getProvider();

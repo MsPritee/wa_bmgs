@@ -74,6 +74,10 @@ router.post(
         media: body.media,
       });
     } catch (err) {
+      const providerErr = err as { status?: number; meta?: unknown };
+      console.error(
+        `[messages] provider send failed status=${providerErr.status ?? 'n/a'} error=${err instanceof Error ? err.message : String(err)} detail=${typeof providerErr.meta === 'string' ? providerErr.meta : JSON.stringify(providerErr.meta) ?? ''}`,
+      );
       await prisma.message.update({
         where: { id: message.id },
         data: { status: MessageStatus.FAILED, metadata: { error: err instanceof Error ? err.message : 'send failed' } },
