@@ -33,6 +33,11 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Record not found' } });
     return;
   }
+  const parseErr = err as { type?: string; expose?: boolean; status?: number };
+  if (parseErr?.type === 'entity.parse.failed') {
+    res.status(400).json({ error: { code: 'INVALID_JSON', message: 'Request body is not valid JSON' } });
+    return;
+  }
   console.error('[api] unhandled error:', err);
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'Internal server error' } });
 }
