@@ -54,6 +54,8 @@ router.post('/webhooks/whatsapp', async (req, res) => {
   }
 
   const payload = req.body as WhatsAppWebhookPayload;
+  const field = payload.entry?.[0]?.changes?.[0]?.field;
+  console.log(`[whatsapp] webhook received object=${payload.object ?? 'n/a'} field=${field ?? 'n/a'}`);
   const idempotencyKey = `${payload.object ?? 'wa'}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 
   const event = await prisma.whatsAppWebhookEvent.create({
@@ -83,7 +85,10 @@ async function ingest(payload: WhatsAppWebhookPayload) {
   if (!businessPhone || !customerPhone) return;
 
   const tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: businessPhone, status: 'ACTIVE' } });
-  if (!tenant) return;
+  if (!tenant) {
+    console.warn(`[whatsapp] event dropped: no tenant matches display_phone_number=${businessPhone}`);
+    return;
+  }
 
   // Deduplicate by Meta message ID
   const existing = await prisma.message.findFirst({
