@@ -45,10 +45,17 @@ router.post(
   async (req, res) => {
     const body = sendSchema.parse(req.body);
     const tenantId = scopeTenantId(req);
+    console.log(`[messages] /send called tenantId=${tenantId} conversationId=${body.conversationId} user=${req.user?.id ?? 'n/a'}`);
     const convo = await prisma.conversation.findFirst({ where: { id: body.conversationId, tenantId } });
     if (!convo) throw ApiError.notFound('Conversation not found');
     const customer = await prisma.customer.findUnique({ where: { id: convo.customerId } });
     const convoPhone = customer?.phone ?? '';
+    console.log(`[messages] customer phone=${convoPhone} (customerId=${convo.customerId})`);
+
+    if (!convoPhone) {
+      console.error('[messages] customer has no phone number — cannot send');
+      throw ApiError.badRequest('Customer has no phone number');
+    }
 
     const message = await prisma.message.create({
       data: {
@@ -65,7 +72,7 @@ router.post(
     });
 
     let result: { providerMessageId: string };
-    console.log('[messages] Attempting to send message to phone:', convoPhone, 'messageType:', body.messageType);
+    console.log(`[messages] calling provider.send to=${convoPhone} type=${body.messageType}`);
     try {
       result = await provider.send({
         tenantId,
