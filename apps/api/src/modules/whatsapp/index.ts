@@ -46,14 +46,26 @@ function normalizePhone(phone: string): string {
 
 async function findTenantByPhone(displayPhone: string) {
   const normalized = normalizePhone(displayPhone);
+  console.log('[whatsapp] findTenantByPhone: displayPhone=', displayPhone, 'normalized=', normalized);
   let tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: normalized, status: 'ACTIVE' } });
-  if (tenant) return tenant;
-  tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: displayPhone, status: 'ACTIVE' } });
-  if (tenant) return tenant;
-  const allActive = await prisma.tenant.findMany({ where: { status: 'ACTIVE', whatsappPhone: { not: null } } });
-  for (const t of allActive) {
-    if (t.whatsappPhone && normalizePhone(t.whatsappPhone) === normalized) return t;
+  if (tenant) {
+    console.log('[whatsapp] findTenantByPhone: found tenant by normalized phone, tenantId=', tenant.id);
+    return tenant;
   }
+  tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: displayPhone, status: 'ACTIVE' } });
+  if (tenant) {
+    console.log('[whatsapp] findTenantByPhone: found tenant by display phone, tenantId=', tenant.id);
+    return tenant;
+  }
+  const allActive = await prisma.tenant.findMany({ where: { status: 'ACTIVE', whatsappPhone: { not: null } } });
+  console.log('[whatsapp] findTenantByPhone: checking', allActive.length, 'active tenants');
+  for (const t of allActive) {
+    if (t.whatsappPhone && normalizePhone(t.whatsappPhone) === normalized) {
+      console.log('[whatsapp] findTenantByPhone: found tenant by iteration, tenantId=', t.id);
+      return t;
+    }
+  }
+  console.warn('[whatsapp] findTenantByPhone: no tenant found for phone', displayPhone);
   return null;
 }
 
@@ -70,11 +82,16 @@ router.get('/webhooks/whatsapp', (req, res) => {
 });
 
 router.post('/webhooks/whatsapp', async (req, res) => {
+  console.log('[whatsapp] POST /webhooks/whatsapp - request received');
+  console.log('[whatsapp] WHATSAPP_APP_SECRET configured:', !!env.WHATSAPP_APP_SECRET);
+  
   if (env.WHATSAPP_APP_SECRET) {
     const signature = req.headers['x-hub-signature-256'] as string | undefined;
     const rawBody = (req as unknown as { rawBody?: string }).rawBody;
     const raw = typeof rawBody === 'string' ? rawBody : (req.body === undefined ? '' : JSON.stringify(req.body));
+    console.log('[whatsapp] signature present:', !!signature);
     if (!verifySignature(raw, env.WHATSAPP_APP_SECRET, signature)) {
+      console.error('[whatsapp] Invalid webhook signature');
       throw ApiError.unauthorized('Invalid webhook signature');
     }
   }

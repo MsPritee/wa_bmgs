@@ -65,6 +65,7 @@ router.post(
     });
 
     let result: { providerMessageId: string };
+    console.log('[messages] Attempting to send message to phone:', convoPhone, 'messageType:', body.messageType);
     try {
       result = await provider.send({
         tenantId,
@@ -73,6 +74,7 @@ router.post(
         content: body.content,
         media: body.media,
       });
+      console.log('[messages] Provider send success, providerMessageId:', result.providerMessageId);
     } catch (err) {
       const providerErr = err as { status?: number; meta?: unknown };
       console.error(

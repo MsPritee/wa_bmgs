@@ -29,6 +29,12 @@ app.use(express.urlencoded({ extended: true }));
 // WhatsApp webhook MUST be public (signature-verified internally)
 app.use(whatsappRoutes);
 
+// Log all incoming requests for debugging
+app.use((req, _res, next) => {
+  console.log(`[app] ${req.method} ${req.path}`);
+  next();
+});
+
 app.use('/api/v1', apiRoutes);
 
 app.use(notFoundHandler);

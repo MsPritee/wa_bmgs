@@ -50,6 +50,8 @@ const META_ENDPOINT = (version: string, phoneNumberId: string) =>
   `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
 
 async function metaPost(path: string, body: unknown): Promise<SendResult> {
+  console.log('[whatsapp] Meta API POST request to:', path);
+  console.log('[whatsapp] Request body:', JSON.stringify(body).substring(0, 500));
   const res = await fetch(path, {
     method: 'POST',
     headers: {
@@ -58,12 +60,16 @@ async function metaPost(path: string, body: unknown): Promise<SendResult> {
     },
     body: JSON.stringify(body),
   });
+  console.log('[whatsapp] Meta API response status:', res.status);
   if (!res.ok) {
     const detail = await res.text();
+    console.error('[whatsapp] Meta API error detail:', detail);
     throw new ProviderError(`Meta API error ${res.status}`, res.status, detail);
   }
   const payload = (await res.json()) as { messages?: { id?: string }[] };
-  return { providerMessageId: payload.messages?.[0]?.id ?? `meta_${randomUUID()}` };
+  const messageId = payload.messages?.[0]?.id ?? `meta_${randomUUID()}`;
+  console.log('[whatsapp] Meta API success, message ID:', messageId);
+  return { providerMessageId: messageId };
 }
 
 function assertMetaConfig(): void {
@@ -177,12 +183,15 @@ class MetaProvider implements WhatsAppProvider {
 
 class MockProvider implements WhatsAppProvider {
   private async simulate(): Promise<void> {
+    console.log('[whatsapp] MockProvider: simulating API call (no real message sent)');
     await new Promise((r) => setTimeout(r, 120));
   }
 
   async sendText(): Promise<SendResult> {
     await this.simulate();
-    return { providerMessageId: `mock_${randomUUID()}` };
+    const mockId = `mock_${randomUUID()}`;
+    console.log('[whatsapp] MockProvider: sendText returning mock ID:', mockId);
+    return { providerMessageId: mockId };
   }
 
   async sendTemplate(): Promise<SendResult> {
