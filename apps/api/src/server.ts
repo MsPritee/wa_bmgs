@@ -10,8 +10,16 @@ server.listen(port, () => {
   console.log(`[api] whatsapp provider: ${describeProvider()}`);
 });
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[api] unhandledRejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[api] uncaughtException:', err);
+  process.exit(1);
+});
+
 function shutdown(signal: string) {
-   
   console.log(`[api] ${signal} received, shutting down`);
   server.close(() => process.exit(0));
 }

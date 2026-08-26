@@ -6,8 +6,6 @@ import { env } from '../../config/env.js';
 import { ApiError, ok } from '../../lib/http.js';
 import { ConversationStatus, ConversationMode } from '@wa/shared';
 
-// Inbound ingest from the WhatsApp provider. Public route protected by the
-// provider signature (X-Hub-Signature-256) and idempotency keys.
 const router = Router();
 
 type WhatsAppWebhookPayload = {
@@ -25,11 +23,39 @@ type WhatsAppWebhookPayload = {
           from?: string;
           timestamp?: string;
           text?: { body?: string };
+          image?: { id?: string; mime_type?: string; caption?: string };
+          document?: { id?: string; mime_type?: string; caption?: string; filename?: string };
+          audio?: { id?: string; mime_type?: string };
+          video?: { id?: string; mime_type?: string; caption?: string };
+        }[];
+        statuses?: {
+          id?: string;
+          status?: string;
+          timestamp?: string;
+          recipient_id?: string;
+          errors?: { code?: number; title?: string; message?: string; error_data?: { details?: string } }[];
         }[];
       };
     }[];
   }[];
 };
+
+function normalizePhone(phone: string): string {
+  return phone.replace(/[^\d]/g, '');
+}
+
+async function findTenantByPhone(displayPhone: string) {
+  const normalized = normalizePhone(displayPhone);
+  let tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: normalized, status: 'ACTIVE' } });
+  if (tenant) return tenant;
+  tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: displayPhone, status: 'ACTIVE' } });
+  if (tenant) return tenant;
+  const allActive = await prisma.tenant.findMany({ where: { status: 'ACTIVE', whatsappPhone: { not: null } } });
+  for (const t of allActive) {
+    if (t.whatsappPhone && normalizePhone(t.whatsappPhone) === normalized) return t;
+  }
+  return null;
+}
 
 // GET verification handshake
 router.get('/webhooks/whatsapp', (req, res) => {
@@ -56,109 +82,176 @@ router.post('/webhooks/whatsapp', async (req, res) => {
   const payload = req.body as WhatsAppWebhookPayload;
   const field = payload.entry?.[0]?.changes?.[0]?.field;
   console.log(`[whatsapp] webhook received object=${payload.object ?? 'n/a'} field=${field ?? 'n/a'}`);
-  const idempotencyKey = `${payload.object ?? 'wa'}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
 
+  const idempotencyKey = `${payload.object ?? 'wa'}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const event = await prisma.whatsAppWebhookEvent.create({
     data: { idempotencyKey, provider: 'WHATSAPP', payload: req.body, status: 'RECEIVED' },
   });
 
-  await ingest(payload);
+  try {
+    if (field === 'statuses') {
+      await ingestStatuses(payload);
+    } else {
+      await ingestMessages(payload);
+    }
+  } catch (err) {
+    console.error(`[whatsapp] ingest error:`, err);
+  }
 
   await prisma.whatsAppWebhookEvent.update({ where: { id: event.id }, data: { status: 'PROCESSED', processedAt: new Date() } });
   res.status(200).json(ok({ received: true }));
 });
 
-async function ingest(payload: WhatsAppWebhookPayload) {
+async function ingestMessages(payload: WhatsAppWebhookPayload) {
   const entry = payload.entry?.[0];
   const change = entry?.changes?.[0];
   if (change?.field !== 'messages') return;
   const value = change.value;
-  if (!value || !value.messages?.length) return;
-
-  const incoming = value.messages[0];
-  const metaMsgId = incoming.id;
-  if (!metaMsgId) return;
+  if (!value) return;
 
   const businessPhone = value.metadata?.display_phone_number;
-  const customerPhone = incoming.from;
-  const messageBody = incoming.text?.body ?? '';
-  if (!businessPhone || !customerPhone) return;
+  if (!businessPhone) {
+    console.warn('[whatsapp] ingestMessages: no display_phone_number in metadata');
+    return;
+  }
 
-  const tenant = await prisma.tenant.findFirst({ where: { whatsappPhone: businessPhone, status: 'ACTIVE' } });
+  const tenant = await findTenantByPhone(businessPhone);
   if (!tenant) {
     console.warn(`[whatsapp] event dropped: no tenant matches display_phone_number=${businessPhone}`);
     return;
   }
 
-  // Deduplicate by Meta message ID
-  const existing = await prisma.message.findFirst({
-    where: { tenantId: tenant.id, providerMessageId: metaMsgId }
-  });
-  if (existing) return;
+  const messages = value.messages ?? [];
+  for (const incoming of messages) {
+    const metaMsgId = incoming.id;
+    if (!metaMsgId) continue;
 
-  const normalized = normalizePhone(customerPhone);
-  let customer = await prisma.customer.findFirst({ where: { tenantId: tenant.id, phone: normalized } });
-  if (!customer) {
-    customer = await prisma.customer.create({
-      data: {
-        tenantId: tenant.id,
-        phone: normalized,
-        name: value.contacts?.[0]?.profile?.name,
-        tags: [],
-        lastActivityAt: new Date(),
-      },
+    const customerPhone = incoming.from;
+    if (!customerPhone) continue;
+
+    const existing = await prisma.message.findFirst({
+      where: { tenantId: tenant.id, providerMessageId: metaMsgId }
     });
-  }
-  await prisma.customer.update({ where: { id: customer.id }, data: { lastActivityAt: new Date() } });
+    if (existing) continue;
 
-  let conversation = await prisma.conversation.findFirst({
-    where: { tenantId: tenant.id, customerId: customer.id, status: { in: ['OPEN', 'PENDING'] } },
-    orderBy: { updatedAt: 'desc' },
-  });
-  if (!conversation) {
-    conversation = await prisma.conversation.create({
-      data: {
-        tenantId: tenant.id,
-        customerId: customer.id,
-        channel: 'WHATSAPP',
-        status: ConversationStatus.OPEN,
-        mode: ConversationMode.AUTOMATED,
-        variables: {},
-      },
+    const normalized = normalizePhone(customerPhone);
+    let customer = await prisma.customer.findFirst({ where: { tenantId: tenant.id, phone: normalized } });
+    if (!customer) {
+      customer = await prisma.customer.create({
+        data: {
+          tenantId: tenant.id,
+          phone: normalized,
+          name: value.contacts?.[0]?.profile?.name,
+          tags: [],
+          lastActivityAt: new Date(),
+        },
+      });
+    }
+    await prisma.customer.update({ where: { id: customer.id }, data: { lastActivityAt: new Date() } });
+
+    let conversation = await prisma.conversation.findFirst({
+      where: { tenantId: tenant.id, customerId: customer.id, status: { in: ['OPEN', 'PENDING'] } },
+      orderBy: { updatedAt: 'desc' },
     });
-  }
+    if (!conversation) {
+      conversation = await prisma.conversation.create({
+        data: {
+          tenantId: tenant.id,
+          customerId: customer.id,
+          channel: 'WHATSAPP',
+          status: ConversationStatus.OPEN,
+          mode: ConversationMode.AUTOMATED,
+          variables: {},
+        },
+      });
+    }
 
-  try {
-    await prisma.message.create({
-      data: {
-        tenantId: tenant.id,
-        conversationId: conversation.id,
-        direction: 'INBOUND',
-        senderType: 'CUSTOMER',
-        senderId: customer.id,
-        messageType: 'TEXT',
-        content: messageBody,
-        providerMessageId: incoming.id,
-        status: 'DELIVERED',
-      },
-    });
-  } catch (err) {
-    if ((err as { code?: string }).code === 'P2002') return;
-    throw err;
-  }
-  await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+    let content = incoming.text?.body ?? '';
+    let messageType = 'TEXT';
 
-  if (incoming.id) {
+    if (incoming.image) {
+      messageType = 'IMAGE';
+      content = incoming.image.caption ?? '';
+    } else if (incoming.document) {
+      messageType = 'DOCUMENT';
+      content = incoming.document.caption ?? incoming.document.filename ?? '';
+    } else if (incoming.audio) {
+      messageType = 'AUDIO';
+    } else if (incoming.video) {
+      messageType = 'VIDEO';
+      content = incoming.video.caption ?? '';
+    }
+
     try {
-      await provider.markAsRead({ messageId: incoming.id });
+      await prisma.message.create({
+        data: {
+          tenantId: tenant.id,
+          conversationId: conversation.id,
+          direction: 'INBOUND',
+          senderType: 'CUSTOMER',
+          senderId: customer.id,
+          messageType,
+          content,
+          providerMessageId: metaMsgId,
+          status: 'DELIVERED',
+        },
+      });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') continue;
+      throw err;
+    }
+
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+
+    try {
+      await provider.markAsRead({ messageId: metaMsgId });
     } catch {
-      /* read receipt is best-effort; never block ingest on it */
+      // read receipt is best-effort
     }
   }
 }
 
-function normalizePhone(phone: string): string {
-  return phone.replace(/[^\d]/g, '');
+async function ingestStatuses(payload: WhatsAppWebhookPayload) {
+  const entry = payload.entry?.[0];
+  const change = entry?.changes?.[0];
+  if (change?.field !== 'statuses') return;
+  const value = change.value;
+  if (!value || !value.statuses?.length) return;
+
+  const businessPhone = value.metadata?.display_phone_number;
+  const tenant = businessPhone ? await findTenantByPhone(businessPhone) : null;
+
+  for (const status of value.statuses) {
+    const metaMsgId = status.id;
+    const newStatus = status.status;
+    if (!metaMsgId || !newStatus) continue;
+
+    const mappedStatus = mapMetaStatus(newStatus);
+
+    if (tenant) {
+      const updated = await prisma.message.updateMany({
+        where: { tenantId: tenant.id, providerMessageId: metaMsgId },
+        data: {
+          status: mappedStatus,
+          metadata: status.errors?.length ? { errors: status.errors } : undefined,
+        },
+      });
+      console.log(`[whatsapp] status update msg=${metaMsgId} status=${newStatus} mapped=${mappedStatus} updated=${updated.count}`);
+    } else {
+      console.warn(`[whatsapp] status update ignored: no tenant for display_phone_number=${businessPhone}`);
+    }
+  }
+}
+
+function mapMetaStatus(status: string): string {
+  switch (status) {
+    case 'sent': return 'SENT';
+    case 'delivered': return 'DELIVERED';
+    case 'read': return 'READ';
+    case 'failed': return 'FAILED';
+    case 'expired': return 'FAILED';
+    default: return 'SENT';
+  }
 }
 
 export default router;
